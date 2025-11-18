@@ -40,15 +40,15 @@ mlflow.set_experiment("Quantum_Compiler_PPO")  # Exp name for grouping runs
 def evaluate_agent(model, env, n_episodes=100):
     """
     Evaluate the trained agent's performance on fresh quantum circuits.
-    
+
     This function tests how well the agent can optimize new, unseen circuits
     by measuring the depth reduction achieved over multiple episodes.
-    
+
     Args:
         model: Trained PPO model
         env: Quantum circuit environment (wrapped in DummyVecEnv)
         n_episodes: Number of test episodes to run
-        
+
     Returns:
         tuple: (mean_reduction, std_reduction) - performance statistics
     """
@@ -100,7 +100,7 @@ def evaluate_agent(model, env, n_episodes=100):
 # --- Main Training Script ---
 def main():
     """Main training function that orchestrates the entire RL training process."""
-    
+
     # Training configuration
     TIMESTEPS = 1_000_000  # Total training steps (1 M for good convergence)
     MODEL_PATH = "ppo_quantum_compiler.zip"  # Where to save the trained model
@@ -117,7 +117,7 @@ def main():
         env,                                      # Environment to train on
         verbose=1,                                # Print training progress
         tensorboard_log="./ppo_tensorboard_log/",  # Log for TensorBoard vis
-        
+
         # PPO-specific hyperparameters (tuned for this problem)
         n_steps=2048,        # Steps to collect before each policy update
         batch_size=64,       # Mini-batch size for gradient updates
@@ -152,7 +152,7 @@ def main():
         # 4. Set up training with periodic evaluation
         # Create separate environment for evaluation (avoids interference with training)
         eval_env = DummyVecEnv([lambda: QuantumCircuitEnv(max_steps=20)])
-        
+
         # EvalCallback monitors training progress and saves best models
         eval_callback = EvalCallback(
             eval_env,                              # Environment for evaluation
