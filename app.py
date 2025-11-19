@@ -18,7 +18,7 @@ API Endpoints:
 - GET /health: Health check for deployment monitoring
 
 Requirements:
-- Trained PPO model file: 'ppo_quantum_compiler.zip'
+- Trained PPO model file: 'ppo_quantum_compiler_enhanced.zip'
 - FastAPI: Web framework and API server
 - Stable Baselines3: RL model loading
 - Qiskit: Quantum circuit manipulation
@@ -66,7 +66,7 @@ class OptimizationResponse(BaseModel):
 # === MODEL LOADING AND INITIALIZATION ===
 
 # Configuration
-MODEL_PATH = "ppo_quantum_compiler.zip"
+MODEL_PATH = "ppo_quantum_compiler_enhanced.zip"
 HTML_FILE = "index.html"
 
 # Initialize global model variable
@@ -81,7 +81,7 @@ def load_model():
     try:
         if not os.path.exists(MODEL_PATH):
             print(f"WARNING: Model file {MODEL_PATH} not found.")
-            print("Please run train.py to generate the trained model.")
+            print("Please run train_enhanced.py to generate the enhanced trained model.")
             return False
 
         print("Loading trained PPO model...")
@@ -161,7 +161,7 @@ async def optimize_circuit(request: OptimizationRequest) -> OptimizationResponse
     if not model_loaded or model is None:
         raise HTTPException(
             status_code=503,
-            detail="Model not available. Please ensure ppo_quantum_compiler.zip exists and train.py has been run."
+            detail="Model not available. Please ensure ppo_quantum_compiler_enhanced.zip exists and train_enhanced.py has been run."
         )
 
     # Validate input
