@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL Quantum Compiler - FastAPI & JS</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Set default font -->
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        .code-box { min-height: 250px; background-color: #1e293b; color: #f8fafc; }
+    </style>
+</head>
+<body class="p-8">
+
+    <div class="max-w-7xl mx-auto bg-white p-6 md:p-10 shadow-xl rounded-xl">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-indigo-700">🤖 RL Quantum Circuit Compiler</h1>
+            <p class="mt-2 text-xl text-gray-600">FastAPI backend + Vanilla JavaScript frontend.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Input Column -->
+            <div class="md:col-span-2">
+                <label for="qasm-input" class="block text-lg font-medium text-gray-700 mb-2">
+                    Input QASM 2.0 Circuit (5-15 Qubits)
+                </label>
+                <textarea id="qasm-input" 
+                          rows="15" 
+                          class="code-box w-full p-4 rounded-lg border-2 border-indigo-300 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none transition duration-150 ease-in-out"
+                          placeholder="Paste your OPENQASM 2.0 here..."></textarea>
+                
+                <button id="compile-btn" 
+                        class="mt-4 w-full px-6 py-3 border border-transparent text-lg font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                    ▶️ Compile Circuit (Run RL Policy)
+                </button>
+
+                <div id="status-message" class="mt-4 p-3 rounded-lg text-sm transition duration-300 ease-in-out hidden"></div>
+            </div>
+
+            <!-- Metrics Column -->
+            <div class="md:col-span-1">
+                <h2 class="text-xl font-semibold text-gray-700 mb-3">Optimization Metrics</h2>
+                <div id="metrics-output" class="p-4 bg-gray-50 rounded-lg shadow-inner min-h-[300px]">
+                    <p class="text-gray-500">Press Compile to see results.</p>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="text-2xl font-semibold text-gray-800 mt-10 mb-4 border-b pb-2">Circuit QASM Comparison</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Initial QASM Output -->
+            <div>
+                <label class="block text-lg font-medium text-gray-700 mb-2">Initial Circuit QASM</label>
+                <pre id="initial-qasm-output" class="code-box p-4 rounded-lg overflow-auto text-sm"></pre>
+            </div>
+
+            <!-- Optimized QASM Output -->
+            <div>
+                <label class="block text-lg font-medium text-gray-700 mb-2">Optimized QASM (Agent Output)</label>
+                <pre id="optimized-qasm-output" class="code-box p-4 rounded-lg overflow-auto text-sm"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use the current deployment host for the API, falling back to localhost for testing
+        const API_BASE_URL = window.location.origin.includes('localhost') ? 'http://localhost:8000' : window.location.origin;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const qasmInput = document.getElementById('qasm-input');
+            const compileBtn = document.getElementById('compile-btn');
+            const metricsOutput = document.getElementById('metrics-output');
+            const initialQasmOutput = document.getElementById('initial-qasm-output');
+            const optimizedQasmOutput = document.getElementById('optimized-qasm-output');
+            const statusMessage = document.getElementById('status-message');
+
+            // Set example QASM on load
+            qasmInput.value = `OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[8];
+creg c[8];
+h q[0];
+cx q[0],q[1];
+rz(0.1) q[0];
+cx q[1],q[2];
+rz(0.2) q[1];
+cx q[2],q[3];
+cx q[3],q[4];
+rz(0.3) q[2];
+cx q[4],q[5];
+cx q[5],q[6];
+rz(0.4) q[3];
+cx q[6],q[7];
+cx q[7],q[0];
+barrier q;
+measure q -> c;
+`;
+
+            compileBtn.addEventListener('click', async () => {
+                const qasmString = qasmInput.value;
+                if (!qasmString.trim()) {
+                    showStatus("Input QASM cannot be empty.", "bg-yellow-100 text-yellow-800");
+                    return;
+                }
+
+                showStatus("Compiling circuit using RL Policy...", "bg-blue-100 text-blue-800");
+                compileBtn.disabled = true;
+                metricsOutput.innerHTML = '<p class="text-gray-500">Running inference...</p>';
+                initialQasmOutput.textContent = '...';
+                optimizedQasmOutput.textContent = '...';
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/optimize`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ qasm_string: qasmString }),
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        // Handle 4xx or 5xx errors from the FastAPI backend
+                        throw new Error(data.detail || 'Optimization failed on the server.');
+                    }
+
+                    // Success: Update outputs
+                    initialQasmOutput.textContent = data.initial_qasm;
+                    optimizedQasmOutput.textContent = data.optimized_qasm;
+
+                    const metricsHtml = `
+                        <p class="font-bold text-gray-800 mb-2">--- Initial Circuit ---</p>
+                        <p>Depth: ${data.initial_depth}</p>
+                        <p>Gate Count: ${data.initial_size}</p>
+                        <br>
+                        <p class="font-bold text-gray-800 mb-2">--- Optimized Circuit ---</p>
+                        <p>Depth: ${data.optimized_depth}</p>
+                        <p>Gate Count: ${data.optimized_size}</p>
+                        <br>
+                        <p class="font-bold text-indigo-600">--- Performance ---</p>
+                        <p class="text-xl font-extrabold text-green-700">Depth Reduction: ${data.depth_reduction_percent.toFixed(2)}%</p>
+                        <p>Gate Reduction: ${data.gate_reduction_percent.toFixed(2)}%</p>
+                    `;
+                    metricsOutput.innerHTML = metricsHtml;
+                    showStatus("Optimization complete!", "bg-green-100 text-green-800");
+
+                } catch (error) {
+                    console.error('Error during fetch:', error);
+                    metricsOutput.innerHTML = `<p class="text-red-600 font-bold">Error:</p><p class="text-red-500">${error.message}</p>`;
+                    showStatus(`Compilation failed: ${error.message}`, "bg-red-100 text-red-800");
+                } finally {
+                    compileBtn.disabled = false;
+                }
+            });
+
+            function showStatus(message, classes) {
+                statusMessage.className = `mt-4 p-3 rounded-lg text-sm transition duration-300 ease-in-out ${classes}`;
+                statusMessage.textContent = message;
+                statusMessage.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,26 +1,21 @@
-# Qiskit for quantum circuits
+# Quantum circuit processing
 qiskit==1.1.1
 
-# Reinforcement Learning library
+# Reinforcement Learning
 stable-baselines3[extra]==2.3.2
 
 # Environment library
 gymnasium==0.29.1
 
-# Gym/Gymnasium compatibility
-shimmy==1.3.0
-
 # Numerical computing
 numpy==1.26.4
 
-# Web UI
-gradio==4.39.0
-
-# Experiment tracking
-mlflow==2.14.3
-
-# API for health check
+# Web framework and API
 fastapi==0.111.1
+pydantic==2.7.4
 
-# Server for Gradio/FastAPI
+# ASGI server for production
 uvicorn==0.30.3
+
+# Optional: Experiment tracking (if you want to retrain models)
+mlflow==2.14.3
