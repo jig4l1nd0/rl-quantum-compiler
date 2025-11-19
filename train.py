@@ -55,9 +55,13 @@ def evaluate_agent(model, env, n_episodes=100):
     print("\nStarting evaluation...")
     all_reductions = []  # Store depth reduction for each episode
 
+    # Create a single environment for cleaner evaluation
+    # This avoids the complexity of dealing with vectorized environments
+    single_env = QuantumCircuitEnv(max_steps=30)
+
     for episode in range(n_episodes):
         # Reset environment to get a new random quantum circuit
-        obs, info = env.reset()
+        obs, info = single_env.reset()
         initial_depth = info['initial_depth']  # Record starting circuit depth
 
         terminated = False  # Episode completed (max steps reached)
@@ -66,9 +70,13 @@ def evaluate_agent(model, env, n_episodes=100):
         # Let the agent optimize the circuit for up to max_steps
         while not terminated and not truncated:
             # Use deterministic policy (no exploration) for evaluation
-            action, _states = model.predict(obs, deterministic=True)
+            # Wrap obs for model prediction (model expects vectorized input)
+            obs_wrapped = np.array([obs])
+            action, _states = model.predict(obs_wrapped, deterministic=True)
+            # Extract action from array format
+            action = action[0] if isinstance(action, np.ndarray) else action
             # Apply the chosen transpiler pass and get new state
-            obs, reward, terminated, truncated, info = env.step(action)
+            obs, reward, terminated, truncated, info = single_env.step(action)
 
         final_depth = info['depth']  # Get final optimized circuit depth
 
@@ -102,13 +110,14 @@ def main():
     """Main training function that orchestrates the entire RL training process."""
 
     # Training configuration
-    TIMESTEPS = 1_000_000  # Total training steps (1 M for good convergence)
+    TIMESTEPS = 1_000_000  # Increased for better convergence
     MODEL_PATH = "ppo_quantum_compiler.zip"  # Where to save the trained model
 
     # 1. Create and wrap the environment
     # DummyVecEnv is required by Stable Baselines3 for single environments
     # It provides vectorized interface even with just one environment
-    env = DummyVecEnv([lambda: QuantumCircuitEnv(max_steps=20)])
+    # Increase max_steps to give agent more opportunities to optimize
+    env = DummyVecEnv([lambda: QuantumCircuitEnv(max_steps=30)])
 
     # 2. Define the PPO model with hyperparameters
     # MlpPolicy = Multi-Layer Perceptron (standard feed-forward neural network)
@@ -125,8 +134,8 @@ def main():
         gamma=0.99,          # Discount factor (how much to value future rewards)
         gae_lambda=0.95,     # GAE parameter for advantage estimation
         clip_range=0.2,      # PPO clipping parameter (prevents large policy changes)
-        ent_coef=0.01,       # Entropy coefficient (encourages exploration)
-        learning_rate=3e-4,  # Learning rate for neural network updates
+        ent_coef=0.05,       # Increased entropy for more exploration
+        learning_rate=5e-4,  # Slightly higher learning rate
     )
 
     # 3. Start an MLflow run for experiment tracking
@@ -146,19 +155,19 @@ def main():
             "gae_lambda": model.gae_lambda,                 # GAE parameter
             "clip_range": model.clip_range,
             "ent_coef": model.ent_coef,
-            "learning_rate": "3e-4",
+            "learning_rate": "5e-4",
         })
 
         # 4. Set up training with periodic evaluation
         # Create separate environment for evaluation (avoids interference with training)
-        eval_env = DummyVecEnv([lambda: QuantumCircuitEnv(max_steps=20)])
+        eval_env = DummyVecEnv([lambda: QuantumCircuitEnv(max_steps=30)])
 
         # EvalCallback monitors training progress and saves best models
         eval_callback = EvalCallback(
             eval_env,                              # Environment for evaluation
             best_model_save_path='./best_model/',  # Save best performing model
             log_path='./logs/',                    # Evaluation logs
-            eval_freq=25000,                       # Evaluate every 25k steps
+            eval_freq=50000,                       # Evaluate every 50k steps
             deterministic=True,                    # Use deterministic policy for eval
             render=False                           # Don't render during evaluation
         )
@@ -166,7 +175,7 @@ def main():
         print("\nStarting model training...")
         # Main training loop - this is where the agent learns
         model.learn(
-            total_timesteps=TIMESTEPS,  # Train for 1M steps
+            total_timesteps=TIMESTEPS,  # Train for 500k steps
             callback=eval_callback,     # Periodic evaluation during training
             progress_bar=True          # Show progress bar
         )
