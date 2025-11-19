@@ -23,6 +23,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from qiskit.circuit import QuantumCircuit
+from qiskit.circuit.library import HGate, XGate, YGate, ZGate, CXGate
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import (
     Optimize1qGates, CXCancellation, CommutationAnalysis,
@@ -130,7 +131,10 @@ class QuantumCircuitEnv(gym.Env):
             Optimize1qGates(),          # Optimize 1-qubit gate sequences
             CXCancellation(),           # Cancel adjacent CNOT gates
             CommutationAnalysis(),      # Analyze gate commutation relations
-            InverseCancellation(max_passes=3),  # Cancel inverse operations
+            # Cancel inverse operations for common self-inverse gates
+            InverseCancellation([
+                CXGate(), HGate(), XGate(), YGate(), ZGate()
+            ]),
             Collect2qBlocks(),          # Group 2-qubit gates together
             ConsolidateBlocks(),        # Merge gate blocks when possible
             Unroll3qOrMore(),           # Decompose 3+ qubit gates
@@ -146,14 +150,30 @@ class QuantumCircuitEnv(gym.Env):
             BarrierBeforeFinalMeasurements() # Add barriers before measurements
         ]
 
-        # Add preset Qiskit optimization levels as high-level actions
+        # Add preset optimization levels as high-level actions
         # These apply multiple passes in optimized sequences
         # Note: These are powerful and might overshadow individual passes
-        self.transpiler_passes.extend([
-            PassManager.from_config(optimization_level=1),  # Light optimization
-            PassManager.from_config(optimization_level=2),  # Medium optimization
-            PassManager.from_config(optimization_level=3)   # Heavy optimization
-        ])
+
+        # Level 1: Light optimization
+        level1_passes = [Optimize1qGates(), CXCancellation()]
+        self.transpiler_passes.append(PassManager(level1_passes))
+
+        # Level 2: Medium optimization
+        level2_passes = [
+            Optimize1qGates(), CXCancellation(),
+            CommutationAnalysis(), Collect2qBlocks()
+        ]
+        self.transpiler_passes.append(PassManager(level2_passes))
+
+        # Level 3: Heavy optimization
+        level3_passes = [
+            Optimize1qGates(), CXCancellation(), CommutationAnalysis(),
+            InverseCancellation([
+                CXGate(), HGate(), XGate(), YGate(), ZGate()
+            ]),
+            Collect2qBlocks(), ConsolidateBlocks()
+        ]
+        self.transpiler_passes.append(PassManager(level3_passes))
 
         # Set up Gymnasium spaces for RL algorithms
         self.n_actions = len(self.transpiler_passes)
@@ -162,7 +182,7 @@ class QuantumCircuitEnv(gym.Env):
         # Observation space: fixed-size feature vector
         # [depth, size, num_qubits, gate_count_1, gate_count_2, ...]
         self.observation_space = spaces.Box(
-            low=0,                                    # All features non-negative
+            low=0,                                   # All features non-negative
             high=np.inf,                             # No upper bound
             shape=(STATE_VECTOR_SIZE,),              # Fixed size: 16 features
             dtype=np.float32                         # Standard RL data type
@@ -249,30 +269,48 @@ class QuantumCircuitEnv(gym.Env):
         # Depth scales with qubits to ensure optimization opportunities
         depth = self.np_random.integers(num_qubits * 2, num_qubits * 5)
 
-        # Build the quantum circuit
+        # Build the quantum circuit with intentional optimization opportunities
         self.circuit = QuantumCircuit(num_qubits)
 
         # Start with Hadamard gates on all qubits (creates superposition)
         self.circuit.h(range(num_qubits))
 
-        # Add random gates to create optimization opportunities
+        # Add patterns that create optimization opportunities
         for _ in range(depth):
+            # Add some redundant patterns that can be optimized
+            if self.np_random.random() < 0.3:  # 30% chance for redundant gates
+                # Add pairs of gates that cancel each other
+                q = self.np_random.integers(0, num_qubits)
+                gate_type = self.np_random.choice(['x', 'h', 'z'])
+                if gate_type == 'x':
+                    self.circuit.x(q)
+                    self.circuit.x(q)  # X-X cancels out
+                elif gate_type == 'h':
+                    self.circuit.h(q)
+                    self.circuit.h(q)  # H-H cancels out
+                elif gate_type == 'z':
+                    self.circuit.z(q)
+                    self.circuit.z(q)  # Z-Z cancels out
+
             # Add random 2-qubit gates (CNOT gates)
-            q1, q2 = self.np_random.choice(range(num_qubits), 2, replace=False)
-            self.circuit.cx(q1, q2)
+            if num_qubits > 1:
+                q1, q2 = self.np_random.choice(range(num_qubits), 2, replace=False)
+                self.circuit.cx(q1, q2)
 
             # Add random 1-qubit rotations
             q_1q = self.np_random.integers(0, num_qubits)
             # Random Z-rotation with angle between 0 and 2π
             self.circuit.rz(self.np_random.random() * 2 * np.pi, q_1q)
 
-            # Add barriers for structure (can be optimized away)
-            self.circuit.barrier()
+            # Add barriers occasionally (can be optimized away)
+            if self.np_random.random() < 0.4:  # 40% chance
+                self.circuit.barrier()
             self.circuit.rz(self.np_random.random() * 2 * np.pi, q_1q)
             self.circuit.barrier()
 
         # Add measurements at the end (standard for quantum algorithms)
-        self.circuit.measure_all()
+        # TEMPORARILY DISABLED: Measurements cause transpiler pass issues
+        # self.circuit.measure_all()
 
         # Store initial circuit metrics for reward calculation
         self.initial_depth = self.circuit.depth()
@@ -312,41 +350,48 @@ class QuantumCircuitEnv(gym.Env):
         pass_to_apply = self.transpiler_passes[action]
 
         # Apply the transpiler pass with error handling
+        reward = 0.0  # Initialize reward
         try:
-            # Convert circuit to DAG (Directed Acyclic Graph) format
-            # Many transpiler passes work on DAG representation
-            dag = circuit_to_dag(self.circuit)
-
-            # Create pass manager and apply the selected pass
+            # Apply transpiler pass directly to the circuit
+            # This avoids potential issues with DAG conversion
             pass_manager = PassManager(pass_to_apply)
-            new_dag = pass_manager.run(dag)
-
-            # Convert back to circuit format
-            self.circuit = dag_to_circuit(new_dag)
+            self.circuit = pass_manager.run(self.circuit)
 
             # Get new circuit metrics after optimization
             new_depth = self.circuit.depth()
             new_size = self.circuit.size()
 
-        except Exception as e:
+        except Exception:
             # Handle transpiler pass failures gracefully
             # Some passes might fail on certain circuit structures
             new_depth = self.prev_depth  # No change in metrics
             new_size = self.prev_size
             # Apply penalty for failed optimization attempt
-            reward = -10.0
+            reward = -1.0  # Smaller penalty to avoid discouraging exploration
 
         # === REWARD CALCULATION ===
-        # Calculate improvement from the previous step (not from initial state)
-        # This encourages consistent optimization rather than one-time improvements
-        delta_depth = self.prev_depth - new_depth    # Positive = depth reduced
-        delta_size = self.prev_size - new_size       # Positive = gates reduced
+        if reward == 0.0:  # Only calculate if not set by exception handling
+            # Calculate improvement from the previous step
+            delta_depth = self.prev_depth - new_depth  # Positive = reduced
+            delta_size = self.prev_size - new_size    # Positive = reduced
 
-        # Weighted reward function prioritizing depth reduction
-        # Depth is 10x more important than gate count because:
-        # - Depth directly affects quantum decoherence
-        # - Shorter circuits have higher fidelity on real quantum hardware
-        reward = (delta_depth * 10.0) + (delta_size * 1.0)
+            # Weighted reward function with better shaping
+            # Primary reward: depth reduction (heavily weighted)
+            depth_reward = delta_depth * 10.0
+            
+            # Secondary reward: gate count reduction
+            size_reward = delta_size * 1.0
+            
+            # Small positive reward for taking action (encourages exploration)
+            action_reward = 0.1
+            
+            # Bonus for significant improvements
+            if delta_depth > 0:
+                depth_bonus = 2.0  # Extra reward for any depth reduction
+            else:
+                depth_bonus = 0.0
+                
+            reward = depth_reward + size_reward + action_reward + depth_bonus
 
         # Update metrics for next step's reward calculation
         self.prev_depth = new_depth
@@ -355,7 +400,7 @@ class QuantumCircuitEnv(gym.Env):
         # === EPISODE TERMINATION ===
         # Episode ends when maximum steps reached
         terminated = self.current_step >= self.max_steps
-        truncated = False  # No separate truncation condition in this environment
+        truncated = False  # No separate truncation condition
 
         # Generate new observation and info for next step
         observation = self._get_obs()
@@ -376,7 +421,8 @@ class QuantumCircuitEnv(gym.Env):
         if mode == 'human':
             if self.circuit:
                 print(f"Step: {self.current_step}")
-                print(f"Depth: {self.circuit.depth()}, Size: {self.circuit.size()}")
+                print(f"Depth: {self.circuit.depth()}, "
+                  f"Size: {self.circuit.size()}")
                 # ASCII art representation of the quantum circuit
                 print(self.circuit.draw(output='text', fold=-1))
             else:
