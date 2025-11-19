@@ -53,6 +53,10 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* && 
     echo 'python --version' >> startup.sh && \
     echo 'echo "Environment variables:"' >> startup.sh && \
     echo 'printenv | grep -E "(PYTHON|PIP|PORT)" || echo "No relevant env vars found"' >> startup.sh && \
+    echo 'echo "Python executable path:"' >> startup.sh && \
+    echo 'which python' >> startup.sh && \
+    echo 'echo "Checking uvicorn installation:"' >> startup.sh && \
+    echo 'python -c "import uvicorn; print(f\"Uvicorn version: {uvicorn.__version__}\")" || echo "Uvicorn import failed"' >> startup.sh && \
     echo 'echo "Checking critical files..."' >> startup.sh && \
     echo 'echo "app.py exists: $(test -f app.py && echo YES || echo NO)"' >> startup.sh && \
     echo 'echo "model file exists: $(test -f ppo_quantum_compiler_enhanced.zip && echo YES || echo NO)"' >> startup.sh && \
@@ -66,8 +70,11 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* && 
     echo 'python -c "from stable_baselines3 import PPO; model = PPO.load(\"ppo_quantum_compiler_enhanced.zip\"); print(\"Model loaded successfully\")" || echo "Model loading failed"' >> startup.sh && \
     echo 'echo "Testing environment creation..."' >> startup.sh && \
     echo 'python -c "from rl_compiler_env import QuantumCircuitEnv; env = QuantumCircuitEnv(); print(\"Environment created successfully\")" || echo "Environment creation failed"' >> startup.sh && \
-    echo 'echo "All checks passed! Starting uvicorn server..."' >> startup.sh && \
-    echo 'exec uvicorn app:app --host 0.0.0.0 --port 8000 --log-level info' >> startup.sh && \
+    echo 'echo "Determining port..."' >> startup.sh && \
+    echo 'PORT=${PORT:-8000}' >> startup.sh && \
+    echo 'echo "Using port: $PORT"' >> startup.sh && \
+    echo 'echo "All checks passed! Starting uvicorn server on port $PORT..."' >> startup.sh && \
+    echo 'exec python -m uvicorn app:app --host 0.0.0.0 --port $PORT --log-level info' >> startup.sh && \
     chmod +x startup.sh
 
 # 7. Expose the FastAPI/Uvicorn port
@@ -77,7 +84,7 @@ EXPOSE 8000
 # We use curl (now installed) to hit the /health endpoint we defined in app.py.
 # This confirms the Python application has loaded the PPO model and is running successfully.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # 9. Command to run the startup script with comprehensive logging
 CMD ["./startup.sh"]
