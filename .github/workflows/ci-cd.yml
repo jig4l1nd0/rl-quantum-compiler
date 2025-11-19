@@ -1,0 +1,119 @@
+# This workflow runs Continuous Integration (testing/linting) first, 
+# and only if successful, proceeds to Continuous Deployment (deploying to Render).
+
+name: CI/CD: Test and Deploy to Render
+
+on:
+  push:
+    branches:
+      - main
+  # Optional: Also run on pull requests to ensure code is clean before merging
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-lint:
+    name: 1. Continuous Integration (Test & Lint)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 1.1 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 1.2 Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 1.3 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install flake8 and application requirements
+          pip install flake8
+          pip install -r requirements.txt
+          
+      - name: 1.4 Lint with Flake8
+        run: |
+          echo "Running Flake8 on source files..."
+          # Check for serious errors (E9, F63, F7, F82). Adjust as needed.
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      # NOTE: We cannot run 'python train_enhanced.py' directly as it requires 300K timesteps.
+      # Instead, we run the environment file's self-test.
+      - name: 1.5 Test Environment Self-Check
+        run: |
+          echo "Verifying QuantumCircuitEnv functionality..."
+          # Run the self-test block in the environment file
+          python rl_compiler_env.py
+
+      - name: 1.6 Verify Enhanced Model Loading
+        run: |
+          echo "Testing enhanced PPO model loading..."
+          # Verify the enhanced model can be loaded without errors
+          python -c "
+          from stable_baselines3 import PPO
+          from rl_compiler_env import QuantumCircuitEnv
+          import os
+          if os.path.exists('ppo_quantum_compiler_enhanced.zip'):
+              env = QuantumCircuitEnv()
+              model = PPO.load('ppo_quantum_compiler_enhanced.zip', env=env)
+              print('Enhanced model loaded successfully')
+          else:
+              print('Enhanced model not found, but build will continue')
+          "
+
+      - name: 1.7 Verify Essential Files
+        run: |
+          echo "Checking essential files exist..."
+          files=(
+            "app.py"
+            "rl_compiler_env.py" 
+            "train_enhanced.py"
+            "index.html"
+            "ppo_quantum_compiler_enhanced.zip"
+            "action_specific_training_circuits.json"
+            "requirements.txt"
+            "Dockerfile"
+          )
+          
+          missing_files=()
+          for file in "${files[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing_files+=("$file")
+            else
+              echo "$file"
+            fi
+          done
+          
+          if [ ${#missing_files[@]} -ne 0 ]; then
+            echo "Missing files: ${missing_files[*]}"
+            exit 1
+          fi
+          echo "All essential files present!"
+
+      - name: 1.8 Verify FastAPI API Startup (Dry Run)
+        run: |
+          echo "Testing if FastAPI app loads and initializes..."
+          # Test if app.py can load dependencies and define endpoints without error
+          python -c "import app"
+
+  deploy-to-render:
+    name: 2. Continuous Deployment (Render)
+    # This job will only run if the 'test-and-lint' job succeeded
+    needs: test-and-lint 
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 2.1 Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2.2 Trigger Render Deployment via Webhook
+      # Sends a POST request to the secret hook to start the cloud build
+      - name: 2.2 Trigger Render Deploy Hook
+        run: |
+          echo "Triggering new build on Render..."
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
+          echo "Deployment initiated successfully."
+        env:
+          # This secret must be set in your GitHub repository settings
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
