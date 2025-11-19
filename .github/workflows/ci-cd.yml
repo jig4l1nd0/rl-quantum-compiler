@@ -1,13 +1,11 @@
 # This workflow runs Continuous Integration (testing/linting) first, 
 # and only if successful, proceeds to Continuous Deployment (deploying to Render).
 
-name: CI/CD: Test and Deploy to Render
+name: "CI/CD: Test and Deploy to Render"
 
 on:
   push:
-    branches:
-      - main
-  # Optional: Also run on pull requests to ensure code is clean before merging
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
