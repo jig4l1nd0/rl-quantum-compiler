@@ -95,23 +95,21 @@ jobs:
           # Test if app.py can load dependencies and define endpoints without error
           python -c "import app"
 
-  deploy-to-render:
-    name: 2. Continuous Deployment (Render)
+  deployment-status:
+    name: 2. Deployment Status
     # This job will only run if the 'test-and-lint' job succeeded
     needs: test-and-lint 
     runs-on: ubuntu-latest
 
     steps:
-      - name: 2.1 Checkout Repository
-        uses: actions/checkout@v4
-
-      # 2.2 Trigger Render Deployment via Webhook
-      # Sends a POST request to the secret hook to start the cloud build
-      - name: 2.2 Trigger Render Deploy Hook
+      - name: 2.1 Deployment Notification
         run: |
-          echo "Triggering new build on Render..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
-          echo "Deployment initiated successfully."
-        env:
-          # This secret must be set in your GitHub repository settings
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          echo "All tests passed successfully!"
+          echo ""
+          echo "Render Auto-Deployment:"
+          echo "   -GitHub integration is configured"
+          echo "   -Render will automatically deploy this commit"
+          echo "   -Check your Render dashboard for deployment progress"
+          echo ""
+          echo "Your app will be available at: https://rl-quantum-compiler.onrender.com"
+          echo "Deployment typically takes 2-5 minutes"
